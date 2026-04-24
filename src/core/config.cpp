@@ -30,6 +30,10 @@ JsonDocument BruceConfig::toJson() const {
     setting["c2Password"] = c2Password;
     setting["c2HealthPath"] = c2HealthPath;
     setting["c2UseTLS"] = c2UseTLS;
+    setting["c2AgentEnabled"] = c2AgentEnabled;
+    setting["c2TokenId"] = c2TokenId;
+    setting["c2SecretKey"] = c2SecretKey;
+    setting["c2DeviceId"] = c2DeviceId;
 
 #ifdef HAS_RGB_LED
     setting["ledBright"] = ledBright;
@@ -255,6 +259,26 @@ void BruceConfig::fromFile(bool checkFS) {
         c2UseTLS = setting["c2UseTLS"].as<bool>();
     } else {
         c2UseTLS = false;
+    }
+    if (!setting["c2AgentEnabled"].isNull()) {
+        c2AgentEnabled = setting["c2AgentEnabled"].as<bool>();
+    } else {
+        c2AgentEnabled = true;
+    }
+    if (!setting["c2TokenId"].isNull()) {
+        c2TokenId = setting["c2TokenId"].as<String>();
+    } else {
+        c2TokenId = "cyd-local";
+    }
+    if (!setting["c2SecretKey"].isNull()) {
+        c2SecretKey = setting["c2SecretKey"].as<String>();
+    } else {
+        c2SecretKey = "cambia-esta-clave-larga";
+    }
+    if (!setting["c2DeviceId"].isNull()) {
+        c2DeviceId = setting["c2DeviceId"].as<String>();
+    } else {
+        c2DeviceId = "";
     }
 
 #ifdef HAS_RGB_LED
@@ -499,6 +523,7 @@ void BruceConfig::validateConfig() {
     validateWifiAtStartupValue();
     validateC2Port();
     validateC2HealthPath();
+    validateC2DeviceId();
 #ifdef HAS_RGB_LED
     validateLedBrightValue();
     validateLedColorValue();
@@ -650,6 +675,34 @@ void BruceConfig::validateC2HealthPath() {
 void BruceConfig::setC2UseTLS(bool value) {
     c2UseTLS = value;
     saveFile();
+}
+
+void BruceConfig::setC2AgentEnabled(bool value) {
+    c2AgentEnabled = value;
+    saveFile();
+}
+
+void BruceConfig::setC2TokenId(String value) {
+    value.trim();
+    c2TokenId = value;
+    saveFile();
+}
+
+void BruceConfig::setC2SecretKey(String value) {
+    c2SecretKey = value;
+    saveFile();
+}
+
+void BruceConfig::setC2DeviceId(String value) {
+    value.trim();
+    c2DeviceId = value;
+    validateC2DeviceId();
+    saveFile();
+}
+
+void BruceConfig::validateC2DeviceId() {
+    c2DeviceId.trim();
+    c2DeviceId.replace(" ", "-");
 }
 
 #ifdef HAS_RGB_LED

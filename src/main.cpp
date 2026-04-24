@@ -146,6 +146,7 @@ volatile int tftHeight = VECTOR_DISPLAY_DEFAULT_WIDTH;
 #endif
 
 #include "core/display.h"
+#include "core/c2_agent.h"
 #include "core/led_control.h"
 #include "core/mykeyboard.h"
 #include "core/sd_functions.h"
@@ -812,6 +813,7 @@ void setup() {
 #endif
     //  start a task to handle serial commands while the webui is running
     startSerialCommandsHandlerTask(true);
+    startC2AgentTask();
 
     wakeUpScreen();
     if (bruceConfig.startupApp != "" && !startupApp.startApp(bruceConfig.startupApp)) {

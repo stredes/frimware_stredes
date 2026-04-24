@@ -1,0 +1,4 @@
+platformio
+requests
+esptool
+intelhex

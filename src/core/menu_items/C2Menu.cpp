@@ -1,6 +1,7 @@
 #include "C2Menu.h"
 
 #include "../mykeyboard.h"
+#include "core/c2_agent.h"
 #include "core/display.h"
 #include "core/utils.h"
 #include "core/wifi/wifi_common.h"
@@ -190,6 +191,8 @@ void C2Menu::connectMenu() {
 void C2Menu::configMenu() {
     while (true) {
         std::vector<Option> localOptions = {
+            {String("Agent: ") + (bruceConfig.c2AgentEnabled ? "ON" : "OFF"),
+             []() { bruceConfig.setC2AgentEnabled(!bruceConfig.c2AgentEnabled); }                                },
             {String("IP/Host: ") + (bruceConfig.c2Host.isEmpty() ? "<unset>" : bruceConfig.c2Host),
              []() {
                  String host = keyboard(bruceConfig.c2Host, 96, "C2 Host/IP:");
@@ -217,6 +220,21 @@ void C2Menu::configMenu() {
              }                                                                                                },
             {String("TLS: ") + (bruceConfig.c2UseTLS ? "ON" : "OFF"),
              []() { bruceConfig.setC2UseTLS(!bruceConfig.c2UseTLS); }                                         },
+            {String("Token: ") + (bruceConfig.c2TokenId.isEmpty() ? "<unset>" : bruceConfig.c2TokenId),
+             []() {
+                 String token = keyboard(bruceConfig.c2TokenId, 64, "C2 Token ID:");
+                 if (token.length() > 0) bruceConfig.setC2TokenId(token);
+             }                                                                                                },
+            {String("Secret: ") + (bruceConfig.c2SecretKey.isEmpty() ? "<unset>" : "<saved>"),
+             []() {
+                 String secret = keyboard("", 96, "C2 Secret:", true);
+                 if (secret.length() > 0) bruceConfig.setC2SecretKey(secret);
+             }                                                                                                },
+            {String("Device ID: ") + c2AgentDeviceId(),
+             []() {
+                 String deviceId = keyboard(c2AgentDeviceId(), 64, "C2 Device ID:");
+                 if (deviceId.length() > 0) bruceConfig.setC2DeviceId(deviceId);
+             }                                                                                                },
             {"Back", []() {}},
         };
 
@@ -235,6 +253,14 @@ void C2Menu::showServerStatus() {
     area.addLine("TLS: " + String(bruceConfig.c2UseTLS ? "ON" : "OFF"));
     area.addLine("Health: " + bruceConfig.c2HealthPath);
     area.addLine("WiFi: " + String(WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "offline"));
+    area.addLine("Agent: " + String(bruceConfig.c2AgentEnabled ? "enabled" : "disabled"));
+    area.addLine("Agent task: " + String(isC2AgentRunning() ? "running" : "stopped"));
+    area.addLine("Device ID: " + c2AgentDeviceId());
+    area.addLine("Token: " + (bruceConfig.c2TokenId.isEmpty() ? String("<unset>") : bruceConfig.c2TokenId));
+    area.addLine("Secret: " + String(bruceConfig.c2SecretKey.isEmpty() ? "<unset>" : "<saved>"));
+    area.addLine("Agent status: " + c2AgentStatus());
+    if (c2AgentLastSeenMs() > 0) area.addLine("Last heartbeat: " + String((millis() - c2AgentLastSeenMs()) / 1000) + "s ago");
+    if (!c2AgentLastResult().isEmpty()) area.addLine("Last result: " + c2AgentLastResult());
     area.addLine("");
 
     String reachability;

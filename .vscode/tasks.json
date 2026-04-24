@@ -3,9 +3,61 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "PlatformIO: Build CYD-2USB",
+            "type": "shell",
+            "command": "${workspaceFolder}\\.venv\\Scripts\\platformio.exe",
+            "args": [
+                "run",
+                "-e",
+                "CYD-2USB"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "PlatformIO: Upload CYD-2USB",
+            "type": "shell",
+            "command": "${workspaceFolder}\\.venv\\Scripts\\platformio.exe",
+            "args": [
+                "run",
+                "-e",
+                "CYD-2USB",
+                "-t",
+                "upload"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "PlatformIO: Monitor",
+            "type": "shell",
+            "command": "${workspaceFolder}\\.venv\\Scripts\\platformio.exe",
+            "args": [
+                "device",
+                "monitor",
+                "-e",
+                "CYD-2USB"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        },
+        {
             "label": "Build + Public Download",
             "type": "shell",
-            "command": "python3",
+            "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
             "args": [
                 "${workspaceFolder}/.vscode/build_public_download.py"
             ],
@@ -16,7 +68,7 @@
             "problemMatcher": [],
             "group": {
                 "kind": "build",
-                "isDefault": true
+                "isDefault": false
             }
         }
     ]

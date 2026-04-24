@@ -54,6 +54,10 @@ public:
     String c2Password = "";
     String c2HealthPath = "/health";
     bool c2UseTLS = false;
+    bool c2AgentEnabled = true;
+    String c2TokenId = "cyd-local";
+    String c2SecretKey = "cambia-esta-clave-larga";
+    String c2DeviceId = "";
 
 #ifdef HAS_RGB_LED
     // Led
@@ -148,6 +152,11 @@ public:
     void setC2HealthPath(String value);
     void validateC2HealthPath();
     void setC2UseTLS(bool value);
+    void setC2AgentEnabled(bool value);
+    void setC2TokenId(String value);
+    void setC2SecretKey(String value);
+    void setC2DeviceId(String value);
+    void validateC2DeviceId();
 
 #ifdef HAS_RGB_LED
     // Led
