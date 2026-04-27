@@ -17,6 +17,7 @@ FRAMEWORK_DIR = env.PioPlatform().get_package_dir("framework-arduinoespressif32-
 board_mcu = env.BoardConfig()
 mcu = board_mcu.get("build.mcu", "")
 patchflag_path = join(FRAMEWORK_DIR,mcu, "lib", ".patched")
+project_packages_dir = join(env.get("PROJECT_DIR"), ".pio", "packages")
 
 # patch file only if we didn't do it befored
 if not isfile(join(FRAMEWORK_DIR,mcu, "lib", ".patched")):
@@ -25,6 +26,27 @@ if not isfile(join(FRAMEWORK_DIR,mcu, "lib", ".patched")):
         FRAMEWORK_DIR, mcu, "lib", "libnet80211.a.patched"
     )
 
+    objcopy = env.subst("$OBJCOPY")
+    if not objcopy or objcopy == "$OBJCOPY":
+        local_objcopy = join(
+            project_packages_dir,
+            "toolchain-xtensa-esp-elf",
+            "bin",
+            "xtensa-%s-elf-objcopy.exe" % mcu,
+        )
+        generic_objcopy = join(
+            project_packages_dir,
+            "toolchain-xtensa-esp-elf",
+            "bin",
+            "xtensa-esp-elf-objcopy.exe",
+        )
+        if isfile(local_objcopy):
+            objcopy = local_objcopy
+        elif isfile(generic_objcopy):
+            objcopy = generic_objcopy
+        else:
+            objcopy = ""
+
     if mcu=="esp32c5" or mcu=="esp32c6" :
         env.Execute(
             "pio pkg exec -p toolchain-riscv32-esp -- riscv32-esp-elf-objcopy  --weaken-symbol=ieee80211_raw_frame_sanity_check %s %s"
@@ -32,6 +54,11 @@ if not isfile(join(FRAMEWORK_DIR,mcu, "lib", ".patched")):
         )
     elif mcu=="esp32p4":
         """Do nothing"""
+    elif objcopy:
+        env.Execute(
+            '"%s" --weaken-symbol=ieee80211_raw_frame_sanity_check "%s" "%s"'
+            % (objcopy, original_file, patched_file)
+        )
     else:
         env.Execute(
             "pio pkg exec -p toolchain-xtensa-%s -- xtensa-%s-elf-objcopy  --weaken-symbol=ieee80211_raw_frame_sanity_check %s %s"
@@ -41,15 +68,15 @@ if not isfile(join(FRAMEWORK_DIR,mcu, "lib", ".patched")):
     if isfile("%s.old" % (original_file)):
         remove("%s.old" % (original_file))
 
-    if isfile(original_file):
+    if isfile(original_file) and isfile(patched_file):
         rename(original_file, "%s.old" % (original_file))
-    else:
+    elif not isfile(original_file):
         print("Patch: Original file not found")
 
     if isfile(patched_file):
         rename(patched_file, original_file)
     else:
-        print("Patch: Patched file not found")
+        print("Patch: Patched file not found, keeping original libnet80211.a")
 
 
     def _touch(path):

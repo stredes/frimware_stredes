@@ -34,6 +34,22 @@ const EXECUTABLE = {
   wav: "play",
 };
 
+const IR_CONTROL_ALIASES = {
+  power: ["power", "pwr", "onoff", "standby"],
+  input: ["input", "source", "src", "hdmi", "av"],
+  back: ["back", "return", "exit", "esc"],
+  up: ["up", "arrowup", "cursorup"],
+  menu: ["menu", "home", "smart", "tools"],
+  left: ["left", "arrowleft", "cursorleft"],
+  ok: ["ok", "select", "sel", "enter", "confirm"],
+  right: ["right", "arrowright", "cursorright"],
+  "volume-down": ["volumedown", "voldown", "volminus", "vol-", "volume-"],
+  down: ["down", "arrowdown", "cursordown"],
+  "volume-up": ["volumeup", "volup", "volplus", "vol+", "volume+"],
+};
+
+let irControlFiles = {};
+
 const Dialog = {
   _bg: function (show) {
     let bg = $(".dialog-background");
@@ -300,6 +316,49 @@ function getSerialCommand(fileName) {
   return undefined;
 }
 
+function normalizeIRName(name) {
+  return name
+    .toLowerCase()
+    .replace(/\.ir$/, "")
+    .replace(/[^a-z0-9+-]/g, "");
+}
+
+function findIRControlFile(files, aliases) {
+  return files.find((file) => {
+    const rawName = file.name.toLowerCase().replace(/\.ir$/, "");
+    const normalized = normalizeIRName(file.name);
+    const tokens = rawName.split(/[^a-z0-9+-]+/).filter(Boolean);
+    return aliases.some((alias) => {
+      if (tokens.includes(alias)) return true;
+      return alias.length > 3 && normalized.includes(alias);
+    });
+  });
+}
+
+function updateIRRemote(files) {
+  const remote = $(".ir-remote");
+  if (!remote) return;
+
+  irControlFiles = {};
+  const irFiles = files.filter((file) => file.name.toLowerCase().endsWith(".ir"));
+  const showRemote = irFiles.length > 0 && currentPath.toLowerCase().includes("infrared");
+  remote.classList.toggle("hidden", !showRemote);
+
+  remote.querySelectorAll("[data-ir-control]").forEach((button) => {
+    const control = button.getAttribute("data-ir-control");
+    const match = findIRControlFile(irFiles, IR_CONTROL_ALIASES[control] || []);
+    button.disabled = !match;
+    button.classList.remove("active");
+
+    if (match) {
+      irControlFiles[control] = match.path;
+      button.setAttribute("title", `${button.textContent.trim()} - ${match.name}`);
+    } else {
+      button.setAttribute("title", `${button.textContent.trim()} - no IR file found`);
+    }
+  });
+}
+
 function calcHash(str) {
   let hash = 5381;
   str = str.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
@@ -341,6 +400,7 @@ function syncScrolling() {
 
 function renderFileRow(fileList) {
   $("table.explorer tbody").innerHTML = "";
+  const filesInFolder = [];
   fileList
     .split("\n")
     .sort((a, b) => {
@@ -371,6 +431,7 @@ function renderFileRow(fileList) {
         e.querySelector(".path-row td").classList.add("act-browse");
       } else if (type === "Fi") {
         e = T.fileRow();
+        filesInFolder.push({ name, path: dPath });
         e.querySelector(".file-row").setAttribute("data-file", dPath);
         e.querySelector(".act-rename").setAttribute(
           "data-action",
@@ -409,6 +470,7 @@ function renderFileRow(fileList) {
       }
       $("table.explorer tbody").appendChild(e);
     });
+  updateIRRemote(filesInFolder);
 }
 
 let sdCardAvailable = false;
@@ -1076,6 +1138,20 @@ $(".dialog-background").addEventListener("click", async (e) => {
     Dialog.hide();
     return;
   }
+});
+
+$(".ir-remote")?.addEventListener("click", async (e) => {
+  const button = e.target.closest("[data-ir-control]");
+  if (!button || button.disabled) return;
+
+  const control = button.getAttribute("data-ir-control");
+  const file = irControlFiles[control];
+  if (!file) return;
+
+  e.preventDefault();
+  button.classList.add("active");
+  await runCommand(`ir tx_from_file "${file}"`);
+  setTimeout(() => button.classList.remove("active"), 180);
 });
 
 $(".act-save-oinput-file").addEventListener("click", async (e) => {

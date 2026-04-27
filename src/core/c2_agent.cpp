@@ -8,6 +8,7 @@
 #include <WiFiClientSecure.h>
 #include <esp_system.h>
 #include <globals.h>
+#include <memory>
 
 namespace {
 constexpr uint32_t HEALTHCHECK_INTERVAL_MS = 30000;
@@ -47,25 +48,26 @@ void addAuthHeaders(HTTPClient &http) {
     http.addHeader("Content-Type", "application/json");
 }
 
-bool beginHttp(HTTPClient &http, WiFiClient &client, WiFiClientSecure &secureClient, const String &url) {
-    http.setConnectTimeout(5000);
-    http.setTimeout(8000);
-    if (bruceConfig.c2UseTLS) {
-        secureClient.setInsecure();
-        return http.begin(secureClient, url);
-    }
-    return http.begin(client, url);
-}
-
 bool httpGet(const String &url, String &responseBody, int &statusCode, bool withAuth) {
     HTTPClient http;
-    WiFiClient client;
-    WiFiClientSecure secureClient;
+    http.setConnectTimeout(5000);
+    http.setTimeout(8000);
 
-    if (!beginHttp(http, client, secureClient, url)) {
-        responseBody = "http.begin failed";
-        statusCode = -1;
-        return false;
+    if (bruceConfig.c2UseTLS) {
+        std::unique_ptr<WiFiClientSecure> secureClient(new WiFiClientSecure());
+        secureClient->setInsecure();
+        if (!http.begin(*secureClient, url)) {
+            responseBody = "http.begin failed";
+            statusCode = -1;
+            return false;
+        }
+    } else {
+        WiFiClient client;
+        if (!http.begin(client, url)) {
+            responseBody = "http.begin failed";
+            statusCode = -1;
+            return false;
+        }
     }
 
     if (withAuth) addAuthHeaders(http);
@@ -77,13 +79,24 @@ bool httpGet(const String &url, String &responseBody, int &statusCode, bool with
 
 bool httpPost(const String &url, const String &payload, String &responseBody, int &statusCode) {
     HTTPClient http;
-    WiFiClient client;
-    WiFiClientSecure secureClient;
+    http.setConnectTimeout(5000);
+    http.setTimeout(8000);
 
-    if (!beginHttp(http, client, secureClient, url)) {
-        responseBody = "http.begin failed";
-        statusCode = -1;
-        return false;
+    if (bruceConfig.c2UseTLS) {
+        std::unique_ptr<WiFiClientSecure> secureClient(new WiFiClientSecure());
+        secureClient->setInsecure();
+        if (!http.begin(*secureClient, url)) {
+            responseBody = "http.begin failed";
+            statusCode = -1;
+            return false;
+        }
+    } else {
+        WiFiClient client;
+        if (!http.begin(client, url)) {
+            responseBody = "http.begin failed";
+            statusCode = -1;
+            return false;
+        }
     }
 
     addAuthHeaders(http);
@@ -138,6 +151,16 @@ String buildResultPayload(const String &commandId, bool ok, const String &output
     return payload;
 }
 
+String buildPcCommandPayload(const String &command) {
+    JsonDocument doc;
+    doc["device_id"] = c2AgentDeviceId();
+    doc["command"] = command;
+
+    String payload;
+    serializeJson(doc, payload);
+    return payload;
+}
+
 bool sendHealthcheck() {
     String body;
     int statusCode = 0;
@@ -176,6 +199,29 @@ void sendCommandResult(const String &commandId, bool ok, const String &output) {
     Serial.printf("[C2] RESULT status=%d ok=%d %s\n", statusCode, posted ? 1 : 0, body.c_str());
 }
 
+bool executePcCommand(const String &pcCommand, String &output) {
+    String body;
+    int statusCode = 0;
+    bool posted = httpPost(baseUrl() + "/api/v1/pc/cmd", buildPcCommandPayload(pcCommand), body, statusCode);
+    if (!posted) {
+        output = "PC_CMD request failed " + String(statusCode) + ": " + body;
+        return false;
+    }
+
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, body);
+    if (error) {
+        output = "PC_CMD json failed: " + String(error.c_str());
+        return false;
+    }
+
+    bool ok = doc["ok"] | false;
+    int exitCode = doc["exit_code"] | -1;
+    String commandOutput = doc["output"] | "";
+    output = "exit=" + String(exitCode) + "\n" + commandOutput;
+    return ok;
+}
+
 bool executeCommand(const String &command, String &output) {
     String cmd = command;
     cmd.trim();
@@ -211,6 +257,15 @@ bool executeCommand(const String &command, String &output) {
         bool parsed = serialCli.parse(cliCommand);
         output = parsed ? "CLI command accepted: " + cliCommand : "CLI command failed: " + cliCommand;
         return parsed;
+    }
+    if (cmd.startsWith("PC_CMD ")) {
+        String pcCommand = cmd.substring(7);
+        pcCommand.trim();
+        if (pcCommand.isEmpty()) {
+            output = "Empty PC_CMD command";
+            return false;
+        }
+        return executePcCommand(pcCommand, output);
     }
     if (cmd.equalsIgnoreCase("REBOOT")) {
         output = "Rebooting";
@@ -302,7 +357,7 @@ void c2AgentTask(void *parameter) {
 
 void startC2AgentTask() {
     if (c2AgentTaskHandle != nullptr) return;
-    xTaskCreate(c2AgentTask, "c2Agent", 8192, nullptr, 1, &c2AgentTaskHandle);
+    xTaskCreate(c2AgentTask, "c2Agent", 12288, nullptr, 1, &c2AgentTaskHandle);
 }
 
 bool isC2AgentRunning() { return c2AgentTaskHandle != nullptr; }
