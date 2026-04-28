@@ -145,8 +145,8 @@ volatile int tftWidth = VECTOR_DISPLAY_DEFAULT_HEIGHT;
 volatile int tftHeight = VECTOR_DISPLAY_DEFAULT_WIDTH;
 #endif
 
-#include "core/display.h"
 #include "core/c2_agent.h"
+#include "core/display.h"
 #include "core/led_control.h"
 #include "core/mykeyboard.h"
 #include "core/sd_functions.h"
@@ -594,7 +594,7 @@ static void showBootAsciiSplash() {
         "          _,.-----.,_",
         "       ,-~           ~-.",
         "     ,^___           ___^.",
-        "    /~\"   ~\"   .   \"~   \"~\\",
+        "    /~\"   ~\"  .\"~   \"~\\",
         "    Y  ,--._    I    _.--.  Y",
         "    | Y     ~-. | ,-~     Y |",
         "    | |        }:{        | |",
@@ -621,7 +621,9 @@ static void showBootAsciiSplash() {
     int lineHeight = 9;
     int artLines = sizeof(art) / sizeof(art[0]);
     int maxChars = 0;
-    for (int i = 0; i < artLines; i++) { maxChars = max(maxChars, static_cast<int>(String(art[i]).length())); }
+    for (int i = 0; i < artLines; i++) {
+        maxChars = max(maxChars, static_cast<int>(String(art[i]).length()));
+    }
     int artHeight = artLines * lineHeight;
     int artWidth = maxChars * 6;
     int startY = 8;

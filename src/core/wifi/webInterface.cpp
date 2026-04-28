@@ -43,10 +43,11 @@ String generateToken(int length = 24) {
 void stopWebUi() {
     tft.setLogging(false);
     isWebUIActive = false;
-    server->end();
-    server->~AsyncWebServer();
-    free(server);
-    server = nullptr;
+    if (server) {
+        server->end();
+        delete server;
+        server = nullptr;
+    }
     if (mdnsRunning) {
         MDNS.end();
         mdnsRunning = false;
@@ -746,11 +747,28 @@ void configureWebServer() {
 **********************************************************************/
 void startWebUi(bool mode_ap) {
     bool keepWifiConnected = false;
+    bool networkReady = false;
     if (WiFi.status() != WL_CONNECTED) {
-        if (mode_ap) wifiConnectMenu(WIFI_AP);
-        else wifiConnectMenu(WIFI_STA);
+        if (mode_ap) {
+            networkReady = wifiConnectMenu(WIFI_AP);
+        } else {
+            networkReady = wifiConnectMenu(WIFI_STA);
+        }
     } else {
         keepWifiConnected = true;
+        networkReady = true;
+    }
+
+    if (mode_ap) {
+        networkReady = networkReady || WiFi.getMode() == WIFI_MODE_AP || WiFi.getMode() == WIFI_MODE_APSTA;
+    } else {
+        networkReady = networkReady && WiFi.status() == WL_CONNECTED;
+    }
+
+    if (!networkReady) {
+        displayError("WebUI network failed");
+        if (!keepWifiConnected) { wifiDisconnect(); }
+        return;
     }
 
     // configure web server
@@ -760,10 +778,7 @@ void startWebUi(bool mode_ap) {
         options.clear();
 
         Serial.println("Configuring Webserver ...");
-        if (psramFound()) server = (AsyncWebServer *)ps_malloc(sizeof(AsyncWebServer));
-        else server = (AsyncWebServer *)malloc(sizeof(AsyncWebServer));
-
-        new (server) AsyncWebServer(default_webserverporthttp);
+        server = new AsyncWebServer(default_webserverporthttp);
 
         configureWebServer();
 

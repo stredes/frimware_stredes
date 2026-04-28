@@ -651,12 +651,22 @@ static void applyTouchMenuNavigation(uint8_t menuType, int &index, const std::ve
     }
 
     if (menuType == MENU_TYPE_SUBMENU) {
+        const int sideEdgeWidth = 42;
         int menuSize = options.size();
         int middle = 25 + (tftHeight - 30) / 2;
         int middleUp = middle - (tftHeight - 42) / 3 - FM * LH / 2 + 4;
         int middleDown = middle + (tftHeight - 42) / 3 - FM * LH / 2;
         int selectedTop = middle - FG * LH / 2 - 4;
         int selectedBottom = middle + FG * LH / 2 + 6;
+
+        if (x <= sideEdgeWidth) {
+            PrevPress = true;
+            return;
+        }
+        if (x >= tftWidth - sideEdgeWidth) {
+            NextPress = true;
+            return;
+        }
 
         if (y >= selectedTop && y <= selectedBottom) {
             SelPress = true;
