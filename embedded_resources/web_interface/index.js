@@ -335,13 +335,21 @@ function findIRControlFile(files, aliases) {
   });
 }
 
+function isIRPath(path) {
+  const segments = (path || "")
+    .toLowerCase()
+    .split("/")
+    .filter(Boolean);
+  return segments.includes("infrared") || segments.includes("bruceir");
+}
+
 function updateIRRemote(files) {
   const remote = $(".ir-remote");
   if (!remote) return;
 
   irControlFiles = {};
   const irFiles = files.filter((file) => file.name.toLowerCase().endsWith(".ir"));
-  const showRemote = irFiles.length > 0 && currentPath.toLowerCase().includes("infrared");
+  const showRemote = irFiles.length > 0 && isIRPath(currentPath);
   remote.classList.toggle("hidden", !showRemote);
 
   remote.querySelectorAll("[data-ir-control]").forEach((button) => {

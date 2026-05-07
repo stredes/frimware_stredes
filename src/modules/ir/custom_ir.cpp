@@ -25,6 +25,439 @@ void resetCodesArray() {
 
 static std::vector<IRCode *> recent_ircodes;
 
+void addToRecentCodes(IRCode *ircode);
+void selectRecentIrMenu();
+
+namespace {
+bool selectIRControlFile(FS **selectedFs, String &filepath);
+
+struct IRControlDefinition {
+    const char *label;
+    const char *aliases[5];
+    uint8_t aliasCount;
+    int8_t left;
+    int8_t right;
+    int8_t up;
+    int8_t down;
+};
+
+struct IRControlBox {
+    int16_t x;
+    int16_t y;
+    int16_t w;
+    int16_t h;
+
+    bool contains(uint16_t px, uint16_t py) const {
+        return px >= x && px < (x + w) && py >= y && py < (y + h);
+    }
+};
+
+constexpr uint8_t IR_CUSTOM_CONTROL_COUNT = 11;
+IRCode *customControlAssignments[IR_CUSTOM_CONTROL_COUNT] = {nullptr};
+
+const IRControlDefinition IR_CUSTOM_CONTROLS[IR_CUSTOM_CONTROL_COUNT] = {
+    {"PWR",   {"power", "pwr", "onoff", "standby", ""},          4,  1,  1,  0,  3 },
+    {"INPUT", {"input", "source", "src", "hdmi", "av"},          5,  0,  0,  1,  4 },
+    {"BACK",  {"back", "return", "exit", "esc", ""},             4,  4,  3,  0,  5 },
+    {"UP",    {"up", "arrowup", "cursorup", "", ""},             3,  2,  4,  0,  6 },
+    {"MENU",  {"menu", "home", "smart", "tools", ""},            4,  3,  2,  1,  7 },
+    {"LEFT",  {"left", "arrowleft", "cursorleft", "", ""},       3,  7,  6,  2,  8 },
+    {"OK",    {"ok", "select", "sel", "enter", "confirm"},       5,  5,  7,  3,  9 },
+    {"RIGHT", {"right", "arrowright", "cursorright", "", ""},    3,  6,  5,  4, 10 },
+    {"VOL-",  {"volumedown", "voldown", "volminus", "vol-", "volume-"}, 5, 10, 9, 5, 8},
+    {"DOWN",  {"down", "arrowdown", "cursordown", "", ""},       3,  8, 10,  6,  9 },
+    {"VOL+",  {"volumeup", "volup", "volplus", "vol+", "volume+"}, 5, 9, 8, 7, 10},
+};
+
+String normalizeIRName(const String &name) {
+    String normalized = "";
+    for (size_t i = 0; i < name.length(); ++i) {
+        char c = tolower(name[i]);
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '-') {
+            normalized += c;
+        }
+    }
+    return normalized;
+}
+
+bool irNameHasAliasToken(const String &rawName, const char *alias) {
+    String token = "";
+
+    for (size_t i = 0; i <= rawName.length(); ++i) {
+        char c = (i < rawName.length()) ? tolower(rawName[i]) : '\0';
+        bool keep = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '-';
+
+        if (keep) token += c;
+        else if (token.length() > 0) {
+            if (token.equals(alias)) return true;
+            token = "";
+        }
+    }
+
+    return false;
+}
+
+bool irCodeMatchesAlias(IRCode *code, const char *alias) {
+    if (code == nullptr || alias == nullptr || alias[0] == '\0') return false;
+
+    String rawName = code->name;
+    rawName.toLowerCase();
+    if (irNameHasAliasToken(rawName, alias)) return true;
+
+    if (strlen(alias) > 3) {
+        String normalized = normalizeIRName(code->name);
+        if (normalized.indexOf(alias) != -1) return true;
+    }
+
+    return false;
+}
+
+bool loadIRCodesFromFile(FS *fs, const String &filepath, int maxCodes = 100) {
+    if (fs == nullptr) return false;
+
+    File databaseFile = fs->open(filepath, FILE_READ);
+    if (!databaseFile) {
+        Serial.println("Failed to open IR file.");
+        return false;
+    }
+
+    Serial.println("Opened IR file.");
+    resetCodesArray();
+
+    int total_codes = 0;
+    String line;
+    String txt;
+    codes.push_back(new IRCode());
+
+    while (databaseFile.available() && total_codes < maxCodes) {
+        line = databaseFile.readStringUntil('\n');
+        txt = line.substring(line.indexOf(":") + 1);
+        txt.trim();
+
+        if (line.startsWith("name:")) {
+            if (codes[total_codes]->name != "") {
+                total_codes++;
+                codes.push_back(new IRCode());
+            }
+            codes[total_codes]->name = txt;
+            codes[total_codes]->filepath = txt + " " + filepath.substring(1 + filepath.lastIndexOf("/"));
+        }
+
+        if (line.startsWith("type:")) codes[total_codes]->type = txt;
+        if (line.startsWith("protocol:")) codes[total_codes]->protocol = txt;
+        if (line.startsWith("address:")) codes[total_codes]->address = txt;
+        if (line.startsWith("frequency:")) codes[total_codes]->frequency = txt.toInt();
+        if (line.startsWith("bits:")) codes[total_codes]->bits = txt.toInt();
+        if (line.startsWith("command:")) codes[total_codes]->command = txt;
+        if (line.startsWith("data:") || line.startsWith("value:") || line.startsWith("state:")) {
+            codes[total_codes]->data = txt;
+        }
+
+        if (line.startsWith("#") && total_codes < (int)codes.size() && codes[total_codes]->name != "") {
+            total_codes++;
+            codes.push_back(new IRCode());
+        }
+    }
+
+    databaseFile.close();
+    setup_ir_pin(bruceConfigPins.irTx, OUTPUT);
+    return true;
+}
+
+void mapIRControlCodes(IRCode *mappedControls[]) {
+    for (int i = 0; i < IR_CUSTOM_CONTROL_COUNT; ++i) {
+        mappedControls[i] = nullptr;
+        for (auto code : codes) {
+            if (code == nullptr || code->name == "") continue;
+            for (uint8_t j = 0; j < IR_CUSTOM_CONTROLS[i].aliasCount; ++j) {
+                if (irCodeMatchesAlias(code, IR_CUSTOM_CONTROLS[i].aliases[j])) {
+                    mappedControls[i] = code;
+                    break;
+                }
+            }
+            if (mappedControls[i] != nullptr) break;
+        }
+    }
+}
+
+int firstMappedControl(IRCode *mappedControls[]) {
+    for (int i = 0; i < IR_CUSTOM_CONTROL_COUNT; ++i) {
+        if (mappedControls[i] != nullptr) return i;
+    }
+    return -1;
+}
+
+int moveMappedControl(int currentIndex, int direction, IRCode *mappedControls[]) {
+    if (currentIndex < 0 || currentIndex >= IR_CUSTOM_CONTROL_COUNT) return firstMappedControl(mappedControls);
+
+    int nextIndex = currentIndex;
+    for (int i = 0; i < IR_CUSTOM_CONTROL_COUNT; ++i) {
+        switch (direction) {
+            case 0: nextIndex = IR_CUSTOM_CONTROLS[nextIndex].left; break;
+            case 1: nextIndex = IR_CUSTOM_CONTROLS[nextIndex].right; break;
+            case 2: nextIndex = IR_CUSTOM_CONTROLS[nextIndex].up; break;
+            case 3: nextIndex = IR_CUSTOM_CONTROLS[nextIndex].down; break;
+            default: return currentIndex;
+        }
+
+        if (nextIndex < 0 || nextIndex >= IR_CUSTOM_CONTROL_COUNT) break;
+        if (mappedControls[nextIndex] != nullptr) return nextIndex;
+    }
+
+    return currentIndex;
+}
+
+void computeIRControlLayout(IRControlBox boxes[IR_CUSTOM_CONTROL_COUNT]) {
+    int margin = 12;
+    int gap = 8;
+    int topY = 74;
+    int topButtonH = max(28, (tftHeight > 210) ? 34 : 30);
+    int topButtonW = (tftWidth - margin * 2 - gap) / 2;
+    int padY = topY + topButtonH + 16;
+    int padButtonW = (tftWidth - margin * 2 - gap * 2) / 3;
+    int padButtonH = max(26, min(padButtonW, (tftHeight - padY - 34) / 3));
+
+    boxes[0] = {(int16_t)margin, (int16_t)topY, (int16_t)topButtonW, (int16_t)topButtonH};
+    boxes[1] = {(int16_t)(margin + topButtonW + gap), (int16_t)topY, (int16_t)topButtonW, (int16_t)topButtonH};
+
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            int idx = 2 + row * 3 + col;
+            boxes[idx] = {
+                (int16_t)(margin + col * (padButtonW + gap)),
+                (int16_t)(padY + row * (padButtonH + gap)),
+                (int16_t)padButtonW,
+                (int16_t)padButtonH,
+            };
+        }
+    }
+}
+
+void drawIRControlButton(const IRControlBox &box, int index, bool selected, bool enabled) {
+    uint16_t border = enabled ? bruceConfig.priColor : TFT_DARKGREY;
+    uint16_t fill = bruceConfig.bgColor;
+    uint16_t textColor = border;
+
+    if (index == 0 && enabled) {
+        border = TFT_RED;
+        textColor = TFT_RED;
+    }
+
+    if (selected) {
+        fill = border;
+        textColor = bruceConfig.bgColor;
+    }
+
+    tft.fillRoundRect(box.x, box.y, box.w, box.h, 8, fill);
+    tft.drawRoundRect(box.x, box.y, box.w, box.h, 8, border);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(textColor, fill);
+    tft.drawString(IR_CUSTOM_CONTROLS[index].label, box.x + box.w / 2, box.y + box.h / 2, 1);
+}
+
+void assignIRControlCode(int index, IRCode *code) {
+    if (index < 0 || index >= IR_CUSTOM_CONTROL_COUNT || code == nullptr) return;
+    if (customControlAssignments[index] != nullptr) delete customControlAssignments[index];
+    customControlAssignments[index] = new IRCode(code);
+}
+
+int importIRControlMappingsFromFile(FS *fs, const String &filepath) {
+    if (!loadIRCodesFromFile(fs, filepath)) {
+        displayError("Fail to open file");
+        delay(1500);
+        return 0;
+    }
+
+    IRCode *mappedControls[IR_CUSTOM_CONTROL_COUNT];
+    mapIRControlCodes(mappedControls);
+    int imported = 0;
+    for (int i = 0; i < IR_CUSTOM_CONTROL_COUNT; ++i) {
+        if (mappedControls[i] == nullptr) continue;
+        assignIRControlCode(i, mappedControls[i]);
+        imported++;
+    }
+    resetCodesArray();
+    return imported;
+}
+
+bool pickIRCodeForControl(int controlIndex) {
+    FS *fs = nullptr;
+    String filepath;
+    if (!selectIRControlFile(&fs, filepath)) return false;
+    if (!loadIRCodesFromFile(fs, filepath)) {
+        displayError("Fail to open file");
+        delay(1500);
+        return false;
+    }
+
+    IRCode *selectedCode = nullptr;
+    bool cancelled = false;
+    int defaultIndex = 0;
+
+    for (int i = 0; i < (int)codes.size(); ++i) {
+        if (codes[i] == nullptr || codes[i]->name == "") continue;
+        for (uint8_t j = 0; j < IR_CUSTOM_CONTROLS[controlIndex].aliasCount; ++j) {
+            if (irCodeMatchesAlias(codes[i], IR_CUSTOM_CONTROLS[controlIndex].aliases[j])) {
+                defaultIndex = i;
+                break;
+            }
+        }
+        if (defaultIndex == i) break;
+    }
+
+    options = {};
+    int visualIndex = 0;
+    int menuIndex = 0;
+    for (auto code : codes) {
+        if (code == nullptr || code->name == "") continue;
+        if (visualIndex == defaultIndex) menuIndex = visualIndex;
+        options.push_back({code->name.c_str(), [code, &selectedCode]() { selectedCode = code; }});
+        visualIndex++;
+    }
+    options.push_back({"Cancel", [&]() { cancelled = true; }});
+
+    while (true) {
+        loopOptions(options, menuIndex);
+        if (selectedCode != nullptr || cancelled || check(EscPress)) break;
+    }
+
+    if (selectedCode != nullptr) assignIRControlCode(controlIndex, selectedCode);
+    options.clear();
+    resetCodesArray();
+    while (check(EscPress)) delay(10);
+    return selectedCode != nullptr;
+}
+
+bool customIRControl() {
+    checkIrTxPin();
+    returnToMenu = true;
+
+    int selectedIndex = firstMappedControl(customControlAssignments);
+    if (selectedIndex < 0) selectedIndex = 0;
+
+    IRControlBox boxes[IR_CUSTOM_CONTROL_COUNT];
+    computeIRControlLayout(boxes);
+    bool redraw = true;
+
+    while (true) {
+        if (redraw) {
+            drawMainBorderWithTitle("IR CUSTOM CTRL");
+            tft.setTextSize(FP);
+            tft.setTextDatum(TL_DATUM);
+            tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
+            tft.drawString("SEL send/load  Hold SEL reassign", 12, 52, 1);
+            tft.setTextColor(bruceConfig.secColor, bruceConfig.bgColor);
+            tft.drawString("NEXT/PREV move  ESC back", 12, tftHeight - 14, 1);
+
+            for (int i = 0; i < IR_CUSTOM_CONTROL_COUNT; ++i) {
+                drawIRControlButton(boxes[i], i, i == selectedIndex, customControlAssignments[i] != nullptr);
+            }
+
+            redraw = false;
+        }
+
+        if (touchPoint.pressed) {
+            bool handledTouch = false;
+            for (int i = 0; i < IR_CUSTOM_CONTROL_COUNT; ++i) {
+                if (!boxes[i].contains(touchPoint.x, touchPoint.y)) continue;
+                selectedIndex = i;
+                touchPoint.Clear();
+                redraw = true;
+                handledTouch = true;
+                if (customControlAssignments[i] != nullptr) {
+                    sendIRCommand(customControlAssignments[i], true);
+                    addToRecentCodes(customControlAssignments[i]);
+                } else {
+                    pickIRCodeForControl(i);
+                }
+                break;
+            }
+            if (!handledTouch) touchPoint.Clear();
+        }
+
+        if (check(EscPress)) break;
+        if (check(UpPress)) {
+            selectedIndex = moveMappedControl(selectedIndex, 2, customControlAssignments);
+            redraw = true;
+        }
+        if (check(DownPress)) {
+            selectedIndex = moveMappedControl(selectedIndex, 3, customControlAssignments);
+            redraw = true;
+        }
+        if (check(NextPress)) {
+            selectedIndex = moveMappedControl(selectedIndex, 1, customControlAssignments);
+            redraw = true;
+        }
+        if (check(PrevPress)) {
+            selectedIndex = moveMappedControl(selectedIndex, 0, customControlAssignments);
+            redraw = true;
+        }
+
+        if (check(SelPress, false)) {
+            unsigned long pressStart = millis();
+            bool reassign = false;
+            while (check(SelPress, false)) {
+                if (millis() - pressStart >= 500) {
+                    reassign = true;
+                    break;
+                }
+                delay(10);
+            }
+            check(SelPress);
+
+            if (reassign || customControlAssignments[selectedIndex] == nullptr) {
+                pickIRCodeForControl(selectedIndex);
+            } else {
+                sendIRCommand(customControlAssignments[selectedIndex], true);
+                addToRecentCodes(customControlAssignments[selectedIndex]);
+            }
+            redraw = true;
+        }
+
+        delay(30);
+    }
+
+    digitalWrite(bruceConfigPins.irTx, LED_OFF);
+    while (check(EscPress)) delay(10);
+    return false;
+}
+
+bool customIRControl(FS *fs, const String &filepath) {
+    int imported = importIRControlMappingsFromFile(fs, filepath);
+    if (imported <= 0) {
+        displayError("No control aliases", true);
+        return false;
+    }
+
+    return customIRControl();
+}
+
+bool selectIRControlFile(FS **selectedFs, String &filepath) {
+    if (selectedFs == nullptr) return false;
+
+    checkIrTxPin();
+    resetCodesArray();
+    filepath = "";
+    *selectedFs = nullptr;
+    returnToMenu = true;
+
+    options = {
+        {"Recent",   selectRecentIrMenu       },
+        {"LittleFS", [&]() { *selectedFs = &LittleFS; }},
+        {"Menu",     yield                    },
+    };
+    if (setupSdCard()) options.insert(options.begin(), {"SD Card", [&]() { *selectedFs = &SD; }});
+
+    loopOptions(options);
+
+    if (*selectedFs == nullptr) return false;
+
+    if (!(**selectedFs).exists("/BruceIR")) (**selectedFs).mkdir("/BruceIR");
+    filepath = loopSD(**selectedFs, true, "IR", "/BruceIR");
+    return filepath != "";
+}
+} // namespace
+
 void addToRecentCodes(IRCode *ircode) {
     // copy ircode -> recent_ircodes
     // if code exist in recent codes do not save it
@@ -255,15 +688,22 @@ void otherIRcodes() {
         // select mode
         bool exit = false;
         bool mode_cmd = true;
+        bool mode_custom = false;
         options = {
-            {"Choose cmd", [&]() { mode_cmd = true; } },
-            {"Spam all",   [&]() { mode_cmd = false; }},
-            {"Menu",       [&]() { exit = true; }     },
+            {"Choose cmd",  [&]() { mode_cmd = true; mode_custom = false; } },
+            {"Custom Ctrl", [&]() { mode_cmd = false; mode_custom = true; } },
+            {"Spam all",    [&]() { mode_cmd = false; mode_custom = false; }},
+            {"Menu",        [&]() { exit = true; }                            },
         };
 
         loopOptions(options);
 
         if (exit) return;
+
+        if (mode_custom) {
+            customIRControl(fs, filepath);
+            continue;
+        }
 
         if (!mode_cmd) {
             // Spam all selected
@@ -280,6 +720,10 @@ void otherIRcodes() {
         // else: loop back to loopSD, starting in the same folder (startPath)
     }
 } // end of otherIRcodes
+
+void otherIRCustomControl() {
+    customIRControl();
+}
 
 // IR commands
 
@@ -650,58 +1094,9 @@ void sendRawCommand(uint16_t frequency, String rawData, bool hideDefaultUI) {
 
 bool chooseCmdIrFile(FS *fs, String filepath) {
     checkIrTxPin();
-    resetCodesArray();
-    int total_codes = 0;
-    File databaseFile;
-
     returnToMenu = true;
-
-    databaseFile = fs->open(filepath, FILE_READ);
     drawMainBorder();
-
-    if (!databaseFile) {
-        Serial.println("Failed to open IR file.");
-        return false;
-    }
-    Serial.println("Opened IR file.");
-
-    setup_ir_pin(bruceConfigPins.irTx, OUTPUT);
-
-    // Mode to choose and send command by command (limitted to 100 commands)
-    String line;
-    String txt;
-    codes.push_back(new IRCode());
-
-    while (databaseFile.available() && total_codes < 100) {
-        line = databaseFile.readStringUntil('\n');
-        txt = line.substring(line.indexOf(":") + 1);
-        txt.trim();
-
-        if (line.startsWith("name:")) {
-            if (codes[total_codes]->name != "") {
-                total_codes++;
-                codes.push_back(new IRCode());
-            }
-            // save signal name
-            codes[total_codes]->name = txt;
-            codes[total_codes]->filepath = txt + " " + filepath.substring(1 + filepath.lastIndexOf("/"));
-        }
-
-        if (line.startsWith("type:")) codes[total_codes]->type = txt;
-        if (line.startsWith("protocol:")) codes[total_codes]->protocol = txt;
-        if (line.startsWith("address:")) codes[total_codes]->address = txt;
-        if (line.startsWith("frequency:")) codes[total_codes]->frequency = txt.toInt();
-        if (line.startsWith("bits:")) codes[total_codes]->bits = txt.toInt();
-        if (line.startsWith("command:")) codes[total_codes]->command = txt;
-        if (line.startsWith("data:") || line.startsWith("value:") || line.startsWith("state:")) {
-            codes[total_codes]->data = txt;
-        }
-
-        if (line.startsWith("#") && total_codes < codes.size() && codes[total_codes]->name != "") {
-            total_codes++;
-            codes.push_back(new IRCode());
-        }
-    }
+    if (!loadIRCodesFromFile(fs, filepath)) return false;
 
     options = {};
     bool exit = false;
@@ -718,7 +1113,6 @@ bool chooseCmdIrFile(FS *fs, String filepath) {
         }
     }
     options.push_back({"Main Menu", [&]() { actionTaken = true; exit = true; goToMainMenu = true; }});
-    databaseFile.close();
 
 #ifdef USE_BOOST /// DISABLE 5V OUTPUT
     PPM.disableOTG();

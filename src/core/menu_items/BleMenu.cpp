@@ -20,6 +20,9 @@ void BleMenu::optionsMenu() {
 #if !defined(LITE_VERSION)
     options.push_back({"Media Cmds", [=]() { MediaCommands(hid_ble, true); }});
     options.push_back({"BLE Scan", ble_scan});
+    options.push_back({"BLE Learn", ble_learn});
+    options.push_back({"BLE Probe", ble_probe});
+    options.push_back({"BLE Raw Ctrl", ble_raw_control});
     options.push_back({"BLE Connect", ble_connect});
     options.push_back({"iBeacon", [=]() {
                            ibeacon("Bruce", "e4c159a0-8c82-11e6-bdf4-0800200c9a66", 0x004C);

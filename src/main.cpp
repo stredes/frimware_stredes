@@ -589,12 +589,75 @@ void runStartupStatusCheck() {
 
 bool hasStartupStatusCheckRun() { return startupStatusCheckRan; }
 
+static bool drawAsciiFrameFromText(const String &frameText) {
+    if (frameText.isEmpty()) return false;
+
+    std::vector<String> lines;
+    int start = 0;
+    while (start <= frameText.length()) {
+        int end = frameText.indexOf('\n', start);
+        if (end < 0) end = frameText.length();
+        String line = frameText.substring(start, end);
+        if (line.endsWith("\r")) line.remove(line.length() - 1);
+        lines.push_back(line);
+        if (end >= frameText.length()) break;
+        start = end + 1;
+    }
+    if (lines.empty()) return false;
+
+    int lineHeight = 9;
+    int maxChars = 0;
+    for (const auto &line : lines) maxChars = max(maxChars, static_cast<int>(line.length()));
+
+    int artHeight = static_cast<int>(lines.size()) * lineHeight;
+    int artWidth = maxChars * 6;
+    int startY = 8;
+    int startX = max(0, (tftWidth - artWidth) / 2);
+    if (artHeight < tftHeight - 34) startY = max(6, (tftHeight - 26 - artHeight) / 2);
+
+    tft.fillScreen(bruceConfig.bgColor);
+    tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
+    tft.setTextSize(1);
+
+    for (size_t i = 0; i < lines.size(); ++i) {
+        tft.drawString(lines[i], startX, startY + static_cast<int>(i) * lineHeight, 1);
+    }
+
+    tft.drawCentreString("Iniciando Bruce...", tftWidth / 2, tftHeight - 18, 1);
+    return true;
+}
+
+static bool playBootAsciiAnimation(FS &fs, const char *basePath, int frameCount, int delayMs) {
+    bool drewAny = false;
+    for (int i = 0; i < frameCount; ++i) {
+        char path[64];
+        snprintf(path, sizeof(path), "%s/frame_%03d.txt", basePath, i);
+        if (!fs.exists(path)) break;
+
+        File file = fs.open(path, FILE_READ);
+        if (!file) break;
+        String frameText = file.readString();
+        file.close();
+
+        if (!drawAsciiFrameFromText(frameText)) break;
+        drewAny = true;
+
+        unsigned long start = millis();
+        while (millis() - start < static_cast<unsigned long>(delayMs)) {
+            if (check(AnyKeyPress)) return true;
+            delay(10);
+        }
+    }
+
+    return drewAny;
+}
+
 static void showBootAsciiSplash() {
     static const char *art[] = {
         "          _,.-----.,_",
-        "       ,-~           ~-.",
-        "     ,^___           ___^.",
-        "    /~\"   ~\"  .\"~   \"~\\",
+        "       ,-~            ~-.",
+        "     ,^___            ___^.",
+        "    /~\"    ~\"      .\"~   \"~\\",
         "    Y  ,--._    I    _.--.  Y",
         "    | Y     ~-. | ,-~     Y |",
         "    | |        }:{        | |",
@@ -613,6 +676,11 @@ static void showBootAsciiSplash() {
         "         \\.           ,/",
         "           \"^-.___,-^\""
     };
+
+    if (sdcardMounted && playBootAsciiAnimation(SD, "/startup_ascii", 32, 40)) return;
+    if (LittleFS.exists("/startup_ascii/frame_000.txt") &&
+        playBootAsciiAnimation(LittleFS, "/startup_ascii", 32, 40))
+        return;
 
     tft.fillScreen(bruceConfig.bgColor);
     tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);

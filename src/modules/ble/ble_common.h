@@ -25,6 +25,9 @@ void ble_test();
 
 void ble_scan_setup();
 void ble_scan();
+void ble_learn();
+void ble_probe();
+void ble_raw_control();
 void ble_connect();
 void ble_disconnect();
 
